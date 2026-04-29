@@ -20,7 +20,7 @@ GitHub → Settings → Developer settings → Personal access tokens (Fine-grai
    - 上传代码：把本目录（`index.js` + `package.json`）打成 zip 上传
 2. 触发器：HTTP，认证方式 `anonymous`，请求方式 `POST`
 3. 环境变量：
-   - `GITHUB_REPO` = `yhLangMac/XingShuHelper-Corpus`
+   - `GITHUB_REPO` = `yhLang/XingShuHelper-Corpus`
    - `GITHUB_BRANCH` = `main`
    - `GITHUB_PAT` = 步骤 1 拿到的 token
    - `SHARED_SECRET` = 一段随机字符串（自己用 `openssl rand -hex 32` 生成）

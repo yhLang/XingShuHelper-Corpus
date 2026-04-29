@@ -48,7 +48,7 @@ GitHub repo Settings → Secrets → `DASHSCOPE_API_KEY` 配好即可。
 
 在主项目 `local.properties` 加：
 ```
-CORPUS_REPO=yhLangMac/XingShuHelper-Corpus
+CORPUS_REPO=yhLang/XingShuHelper-Corpus
 CORPUS_BRANCH=main
 ```
 

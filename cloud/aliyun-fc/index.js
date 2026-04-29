@@ -6,7 +6,7 @@
  *   1. 阿里云函数计算控制台 → 创建函数 → 运行环境 Node.js 18
  *   2. 触发器：HTTP，认证方式 anonymous（鉴权由 SHARED_SECRET 自己做）
  *   3. 环境变量：
- *        GITHUB_REPO     = yhLangMac/XingShuHelper-Corpus
+ *        GITHUB_REPO     = yhLang/XingShuHelper-Corpus
  *        GITHUB_BRANCH   = main
  *        GITHUB_PAT      = github_pat_xxx (需要 repo 写权限)
  *        SHARED_SECRET   = 任意长字符串，App BuildConfig 里也存一份
