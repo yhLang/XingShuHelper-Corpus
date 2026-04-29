@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+.embed_cache/
+.embed_cache.pkl
+.DS_Store

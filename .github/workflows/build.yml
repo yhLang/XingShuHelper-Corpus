@@ -1,0 +1,56 @@
+name: Build corpus
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "gold/**"
+      - "tools/build_corpus.py"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-corpus
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install openai
+
+      # embedding 缓存：每个账号各自一份 JSON，命中即不调 API
+      - name: Restore embed cache
+        uses: actions/cache@v4
+        with:
+          path: .embed_cache
+          key: embed-cache-${{ hashFiles('gold/**') }}
+          restore-keys: |
+            embed-cache-
+
+      - name: Build corpus
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: python tools/build_corpus.py
+
+      - name: Commit dist/
+        run: |
+          git config user.name "corpus-bot"
+          git config user.email "corpus-bot@users.noreply.github.com"
+          git add dist/
+          if git diff --staged --quiet; then
+            echo "no dist changes"
+            exit 0
+          fi
+          git commit -m "ci: rebuild corpus dist/ [skip ci]"
+          git push
