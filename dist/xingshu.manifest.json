@@ -1,12 +1,12 @@
 {
-  "version": 5,
+  "version": 6,
   "count": 141,
-  "updated_at": "2026-04-29T17:46:27Z",
+  "updated_at": "2026-04-29T18:17:16Z",
   "files": {
     "texts": {
       "path": "dist/xingshu/qa_xingshu_texts.json",
-      "sha256": "405ce2877b280830f2ea47d591c628aec72e28ce37c400a21f4569d59fd996f4",
-      "size": 57959
+      "sha256": "cf215010ea5165d4208c81400f2e66ca4555a9625df74653cdd8c81b6dd39459",
+      "size": 58049
     },
     "embeddings": {
       "path": "dist/xingshu/qa_xingshu_embeddings.bin",
