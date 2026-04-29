@@ -1,17 +1,17 @@
 {
-  "version": 2,
-  "count": 142,
-  "updated_at": "2026-04-29T17:22:23Z",
+  "version": 3,
+  "count": 141,
+  "updated_at": "2026-04-29T17:23:09Z",
   "files": {
     "texts": {
       "path": "dist/xingshu/qa_xingshu_texts.json",
-      "sha256": "e77281814753984b60d02b4a1f1a9cbff4cce29f476d5d82aacec14bf4f0d058",
-      "size": 58202
+      "sha256": "405ce2877b280830f2ea47d591c628aec72e28ce37c400a21f4569d59fd996f4",
+      "size": 57959
     },
     "embeddings": {
       "path": "dist/xingshu/qa_xingshu_embeddings.bin",
-      "sha256": "aac6e26c48429d9d32d28ec6cb6d1d7b3d90b0977ce1aebcad0b7c1cd344ce7f",
-      "size": 581640
+      "sha256": "17c5aebc190a2b9a0954b7150c350258b5dae64d8665619a026e57cabd5f02da",
+      "size": 577544
     }
   }
 }
