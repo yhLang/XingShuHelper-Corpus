@@ -4,3 +4,4 @@ __pycache__/
 .embed_cache/
 .embed_cache.pkl
 .DS_Store
+web/local-secrets.js

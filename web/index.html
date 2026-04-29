@@ -41,16 +41,23 @@
 
 <h1>金标知识库维护</h1>
 
+<script>
+  // 本地秘钥（gitignored）：存在就给 PAT 输入框自动填默认值。
+  // 不存在则 404 静默忽略，PAT 仍走 localStorage / 手填流程。
+  const _s = document.createElement('script');
+  _s.src = 'local-secrets.js';
+  _s.onerror = () => {};
+  document.head.appendChild(_s);
+</script>
+
 <div class="bar">
-  <span>仓库</span>
-  <input id="repo" type="text" placeholder="owner/repo" style="width:220px">
   <span>账号</span>
   <select id="account">
-    <option value="xingshu">xingshu</option>
-    <option value="kirin">kirin</option>
+    <option value="xingshu">xingshu（行恕书院）</option>
+    <option value="kirin">kirin（麒麟斋）</option>
   </select>
   <span>PAT</span>
-  <input id="pat" type="password" placeholder="github_pat_..." style="width:200px">
+  <input id="pat" type="password" placeholder="github_pat_..." style="width:240px">
   <button id="load">加载</button>
   <button id="save" class="secondary" disabled>保存到 GitHub</button>
   <span id="status" class="status">未加载</span>
@@ -64,14 +71,20 @@
 <div id="list"></div>
 
 <script>
+const REPO = 'yhLang/XingShuHelper-Corpus';
 const $ = id => document.getElementById(id);
 const state = { groups: [], sha: null, dirty: false };
 
-// 持久化配置到 localStorage
-['repo', 'pat', 'account'].forEach(k => {
+// 持久化 PAT 和账号选择到 localStorage（仓库写死）
+// PAT 优先级：localStorage > window.LOCAL_PAT（来自 local-secrets.js，gitignored）
+['pat', 'account'].forEach(k => {
   const v = localStorage.getItem('xs.' + k);
   if (v) $(k).value = v;
   $(k).addEventListener('change', () => localStorage.setItem('xs.' + k, $(k).value));
+});
+// 等 local-secrets.js 加载完（DOMContentLoaded 后已经异步注入），如果还没填就用本地默认
+window.addEventListener('load', () => {
+  if (!$('pat').value && window.LOCAL_PAT) $('pat').value = window.LOCAL_PAT;
 });
 
 function setStatus(msg, kind = '') {
@@ -105,9 +118,8 @@ async function ghApi(method, url, body) {
 async function load() {
   try {
     setStatus('加载中…');
-    const repo = $('repo').value.trim();
-    if (!repo) throw new Error('请填仓库');
-    const data = await ghApi('GET', `/repos/${repo}/contents/${path()}`);
+    if (!$('pat').value.trim()) throw new Error('请填 PAT');
+    const data = await ghApi('GET', `/repos/${REPO}/contents/${path()}`);
     state.sha = data.sha;
     const text = atob(data.content.replace(/\n/g, ''));
     // atob 拿到 latin1，转 UTF-8
@@ -125,7 +137,6 @@ async function load() {
 async function save() {
   try {
     setStatus('保存中…');
-    const repo = $('repo').value.trim();
     const lines = state.groups.map(g => {
       const { _id, _editing, ...rest } = g;
       return JSON.stringify({
@@ -138,7 +149,7 @@ async function save() {
     const text = lines.join('\n') + '\n';
     // utf8 转 base64
     const b64 = btoa(unescape(encodeURIComponent(text)));
-    const resp = await ghApi('PUT', `/repos/${repo}/contents/${path()}`, {
+    const resp = await ghApi('PUT', `/repos/${REPO}/contents/${path()}`, {
       message: `web: 更新 gold/${$('account').value}.jsonl (${state.groups.length} 组)`,
       content: b64,
       sha: state.sha,
