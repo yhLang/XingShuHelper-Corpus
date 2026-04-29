@@ -81,20 +81,48 @@ async function handle(req, res) {
   try {
     const cur = await ghRequest('GET', `/repos/${repo}/contents/${path}?ref=${branch}`, token);
     const oldText = Buffer.from(cur.content, 'base64').toString('utf-8');
-    const line = JSON.stringify({
+
+    const newGroup = {
       scene: qa.scene || '其他',
       questions: qa.questions.map(s => s.trim()).filter(Boolean),
       answer: qa.answer,
       risk_note: qa.risk_note || '',
+    };
+    const newQs = new Set(newGroup.questions);
+
+    // 解析现有 jsonl，按 question 重叠判断是否要替换
+    const lines = oldText.split('\n').filter(l => l.trim());
+    let action = 'append';
+    let mergedLines = lines.map(l => {
+      try {
+        const g = JSON.parse(l);
+        const overlap = (g.questions || []).some(q => newQs.has(q));
+        if (overlap) {
+          action = 'replace';
+          // 合并 questions（去重保留顺序：先现有 + 现有里没出现的新 question）
+          const seen = new Set();
+          const merged = [];
+          for (const q of [...(g.questions || []), ...newGroup.questions]) {
+            if (!seen.has(q)) { seen.add(q); merged.push(q); }
+          }
+          return JSON.stringify({ ...newGroup, questions: merged });
+        }
+      } catch {}
+      return l;
     });
-    const newText = oldText.endsWith('\n') ? oldText + line + '\n' : oldText + '\n' + line + '\n';
+    if (action === 'append') mergedLines = [...mergedLines, JSON.stringify(newGroup)];
+
+    const newText = mergedLines.join('\n') + '\n';
+    if (newText === oldText) {
+      return json(200, { ok: true, action: 'noop', account });
+    }
     const putResp = await ghRequest('PUT', `/repos/${repo}/contents/${path}`, token, {
-      message: `app: 上传金标 QA → ${account} (${qa.scene || '其他'})`,
+      message: `app: ${action === 'replace' ? '更新' : '新增'}金标 QA → ${account} (${qa.scene || '其他'})`,
       content: Buffer.from(newText, 'utf-8').toString('base64'),
       sha: cur.sha,
       branch,
     });
-    return json(200, { ok: true, commit: putResp.commit?.sha, account });
+    return json(200, { ok: true, action, commit: putResp.commit?.sha, account });
   } catch (e) {
     return json(500, { ok: false, error: String(e.message || e) });
   }
