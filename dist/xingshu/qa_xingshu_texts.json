@@ -1126,5 +1126,13 @@
     "business_line": "书画",
     "risk_note": "",
     "is_gold": true
+  },
+  {
+    "scene": "FC联调测试",
+    "question": "这是 FC 端到端测试，请忽略",
+    "answer": "这是 FC 端到端测试 answer，确认链路打通。",
+    "business_line": "书画",
+    "risk_note": "",
+    "is_gold": true
   }
 ]
