@@ -2,15 +2,11 @@
  * 阿里云函数计算（FC）HTTP 触发器：
  * 接收 App 端上传的金标 QA → 追加到 GitHub gold/<account>.jsonl → 触发 CI 重新构建。
  *
- * 部署：
- *   1. 阿里云函数计算控制台 → 创建函数 → 运行环境 Node.js 18
- *   2. 触发器：HTTP，认证方式 anonymous（鉴权由 SHARED_SECRET 自己做）
- *   3. 环境变量：
- *        GITHUB_REPO     = yhLang/XingShuHelper-Corpus
- *        GITHUB_BRANCH   = main
- *        GITHUB_PAT      = github_pat_xxx (需要 repo 写权限)
- *        SHARED_SECRET   = 任意长字符串，App BuildConfig 里也存一份
- *   4. 把本目录所有文件打包上传
+ * 部署：阿里云 FC 3.0 → Web 函数 → Node.js 18 自定义运行时
+ *   - 必须随 zip 一起上传 bootstrap（chmod +x，里面 `exec node /code/index.js`）
+ *   - 监听端口 9000（FC_SERVER_PORT，由 FC 注入）
+ *   - 触发器：HTTP，认证方式 anonymous，仅允许 POST
+ *   - 4 个环境变量（GITHUB_REPO / GITHUB_BRANCH / GITHUB_PAT / SHARED_SECRET）
  *
  * App 端调用：
  *   POST https://<your-fc-url>
@@ -57,54 +53,34 @@ function validQa(qa) {
   return true;
 }
 
-exports.handler = async (req, resp, _ctx) => {
-  resp.setHeader('Content-Type', 'application/json; charset=utf-8');
+async function handle(req, res) {
+  const json = (status, obj) => {
+    res.statusCode = status;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify(obj));
+  };
 
-  if (req.method !== 'POST') {
-    resp.setStatusCode(405);
-    return resp.send(JSON.stringify({ ok: false, error: 'method not allowed' }));
-  }
+  if (req.method !== 'POST') return json(405, { ok: false, error: 'method not allowed' });
 
+  let raw = '';
+  await new Promise((r, e) => { req.on('data', c => raw += c); req.on('end', r); req.on('error', e); });
   let payload;
-  try {
-    const raw = await new Promise((r, e) => {
-      let buf = '';
-      req.on('data', c => buf += c);
-      req.on('end', () => r(buf));
-      req.on('error', e);
-    });
-    payload = JSON.parse(raw);
-  } catch (e) {
-    resp.setStatusCode(400);
-    return resp.send(JSON.stringify({ ok: false, error: 'invalid json' }));
-  }
+  try { payload = JSON.parse(raw); }
+  catch { return json(400, { ok: false, error: 'invalid json' }); }
 
   const { secret, account, qa } = payload;
-  if (secret !== process.env.SHARED_SECRET) {
-    resp.setStatusCode(401);
-    return resp.send(JSON.stringify({ ok: false, error: 'unauthorized' }));
-  }
-  if (!['xingshu', 'kirin'].includes(account)) {
-    resp.setStatusCode(400);
-    return resp.send(JSON.stringify({ ok: false, error: 'invalid account' }));
-  }
-  if (!validQa(qa)) {
-    resp.setStatusCode(400);
-    return resp.send(JSON.stringify({ ok: false, error: 'invalid qa' }));
-  }
+  if (secret !== process.env.SHARED_SECRET) return json(401, { ok: false, error: 'unauthorized' });
+  if (!['xingshu', 'kirin'].includes(account)) return json(400, { ok: false, error: 'invalid account' });
+  if (!validQa(qa)) return json(400, { ok: false, error: 'invalid qa' });
 
   const repo = process.env.GITHUB_REPO;
   const branch = process.env.GITHUB_BRANCH || 'main';
   const token = process.env.GITHUB_PAT;
   const path = `gold/${account}.jsonl`;
-  const apiPath = `/repos/${repo}/contents/${path}?ref=${branch}`;
 
   try {
-    // 1. 拉当前文件（带 sha）
-    const cur = await ghRequest('GET', apiPath, token);
+    const cur = await ghRequest('GET', `/repos/${repo}/contents/${path}?ref=${branch}`, token);
     const oldText = Buffer.from(cur.content, 'base64').toString('utf-8');
-
-    // 2. 追加一行（标准化字段）
     const line = JSON.stringify({
       scene: qa.scene || '其他',
       questions: qa.questions.map(s => s.trim()).filter(Boolean),
@@ -112,24 +88,22 @@ exports.handler = async (req, resp, _ctx) => {
       risk_note: qa.risk_note || '',
     });
     const newText = oldText.endsWith('\n') ? oldText + line + '\n' : oldText + '\n' + line + '\n';
-    const newB64 = Buffer.from(newText, 'utf-8').toString('base64');
-
-    // 3. PUT 回 GitHub
     const putResp = await ghRequest('PUT', `/repos/${repo}/contents/${path}`, token, {
       message: `app: 上传金标 QA → ${account} (${qa.scene || '其他'})`,
-      content: newB64,
+      content: Buffer.from(newText, 'utf-8').toString('base64'),
       sha: cur.sha,
       branch,
     });
-
-    resp.setStatusCode(200);
-    return resp.send(JSON.stringify({
-      ok: true,
-      commit: putResp.commit?.sha,
-      account,
-    }));
+    return json(200, { ok: true, commit: putResp.commit?.sha, account });
   } catch (e) {
-    resp.setStatusCode(500);
-    return resp.send(JSON.stringify({ ok: false, error: String(e.message || e) }));
+    return json(500, { ok: false, error: String(e.message || e) });
   }
-};
+}
+
+const port = process.env.FC_SERVER_PORT || 9000;
+require('http').createServer((req, res) => {
+  handle(req, res).catch(e => {
+    res.statusCode = 500;
+    res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+  });
+}).listen(port, () => console.log(`listening on :${port}`));
