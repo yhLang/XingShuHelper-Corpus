@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>金标知识库维护</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    max-width: 1000px; margin: 0 auto; padding: 16px; color: #222; background: #fafafa; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px;
+    background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 12px; }
+  .bar input, .bar select, .bar button {
+    padding: 6px 10px; font-size: 14px; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+  .bar button { cursor: pointer; background: #2563eb; color: #fff; border: none; }
+  .bar button.secondary { background: #fff; color: #333; border: 1px solid #ccc; }
+  .bar button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status { font-size: 12px; color: #666; }
+  .status.error { color: #c00; }
+  .status.ok { color: #16a34a; }
+  .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px;
+    margin-bottom: 10px; }
+  .card .scene { font-size: 12px; color: #2563eb; font-weight: 600; margin-bottom: 6px; }
+  .card .answer { font-size: 14px; line-height: 1.5; white-space: pre-wrap; margin-bottom: 8px; }
+  .card .qs { font-size: 12px; color: #666; margin-bottom: 6px; }
+  .card .qs span { display: inline-block; background: #eef2ff; color: #3730a3;
+    padding: 2px 8px; border-radius: 12px; margin: 2px 4px 2px 0; }
+  .card .actions { display: flex; gap: 8px; }
+  .card .actions button { font-size: 12px; padding: 4px 10px; cursor: pointer;
+    border: 1px solid #ccc; background: #fff; border-radius: 4px; }
+  .card .actions button.del { color: #c00; border-color: #c99; }
+  textarea, input[type=text] { width: 100%; box-sizing: border-box; padding: 6px 8px;
+    border: 1px solid #ccc; border-radius: 4px; font-family: inherit; font-size: 13px; }
+  .editor { background: #fffbe6; border: 1px solid #fde68a; }
+  .editor label { display: block; font-size: 12px; color: #555; margin: 8px 0 4px; }
+  .editor textarea { resize: vertical; min-height: 60px; }
+  .pending { background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px;
+    font-size: 11px; margin-left: 8px; }
+</style>
+</head>
+<body>
+
+<h1>金标知识库维护</h1>
+
+<div class="bar">
+  <span>仓库</span>
+  <input id="repo" type="text" placeholder="owner/repo" style="width:220px">
+  <span>账号</span>
+  <select id="account">
+    <option value="xingshu">xingshu</option>
+    <option value="kirin">kirin</option>
+  </select>
+  <span>PAT</span>
+  <input id="pat" type="password" placeholder="github_pat_..." style="width:200px">
+  <button id="load">加载</button>
+  <button id="save" class="secondary" disabled>保存到 GitHub</button>
+  <span id="status" class="status">未加载</span>
+</div>
+
+<div class="bar">
+  <input id="search" type="text" placeholder="按 scene / question / answer 关键词过滤" style="flex:1">
+  <button id="add" class="secondary">+ 新增一组</button>
+</div>
+
+<div id="list"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const state = { groups: [], sha: null, dirty: false };
+
+// 持久化配置到 localStorage
+['repo', 'pat', 'account'].forEach(k => {
+  const v = localStorage.getItem('xs.' + k);
+  if (v) $(k).value = v;
+  $(k).addEventListener('change', () => localStorage.setItem('xs.' + k, $(k).value));
+});
+
+function setStatus(msg, kind = '') {
+  const s = $('status');
+  s.textContent = msg;
+  s.className = 'status ' + kind;
+}
+
+function setDirty(d) {
+  state.dirty = d;
+  $('save').disabled = !d;
+}
+
+function path() {
+  return `gold/${$('account').value}.jsonl`;
+}
+
+async function ghApi(method, url, body) {
+  const headers = {
+    'Authorization': `Bearer ${$('pat').value}`,
+    'Accept': 'application/vnd.github+json',
+  };
+  if (body) headers['Content-Type'] = 'application/json';
+  const resp = await fetch(`https://api.github.com${url}`, {
+    method, headers, body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!resp.ok) throw new Error(`${resp.status} ${await resp.text()}`);
+  return resp.json();
+}
+
+async function load() {
+  try {
+    setStatus('加载中…');
+    const repo = $('repo').value.trim();
+    if (!repo) throw new Error('请填仓库');
+    const data = await ghApi('GET', `/repos/${repo}/contents/${path()}`);
+    state.sha = data.sha;
+    const text = atob(data.content.replace(/\n/g, ''));
+    // atob 拿到 latin1，转 UTF-8
+    const utf8 = decodeURIComponent(escape(text));
+    state.groups = utf8.split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+    state.groups.forEach(g => { g._id = Math.random().toString(36).slice(2); });
+    setDirty(false);
+    setStatus(`已加载 ${state.groups.length} 组`, 'ok');
+    render();
+  } catch (e) {
+    setStatus('加载失败: ' + e.message, 'error');
+  }
+}
+
+async function save() {
+  try {
+    setStatus('保存中…');
+    const repo = $('repo').value.trim();
+    const lines = state.groups.map(g => {
+      const { _id, _editing, ...rest } = g;
+      return JSON.stringify({
+        scene: rest.scene || '其他',
+        questions: (rest.questions || []).map(s => s.trim()).filter(Boolean),
+        answer: rest.answer || '',
+        risk_note: rest.risk_note || '',
+      });
+    });
+    const text = lines.join('\n') + '\n';
+    // utf8 转 base64
+    const b64 = btoa(unescape(encodeURIComponent(text)));
+    const resp = await ghApi('PUT', `/repos/${repo}/contents/${path()}`, {
+      message: `web: 更新 gold/${$('account').value}.jsonl (${state.groups.length} 组)`,
+      content: b64,
+      sha: state.sha,
+    });
+    state.sha = resp.content.sha;
+    setDirty(false);
+    setStatus(`已保存到 GitHub。CI 会在几分钟后产出新 dist/`, 'ok');
+  } catch (e) {
+    setStatus('保存失败: ' + e.message, 'error');
+  }
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function render() {
+  const q = $('search').value.trim().toLowerCase();
+  const filtered = state.groups.filter(g => {
+    if (!q) return true;
+    const hay = (g.scene + ' ' + g.answer + ' ' + (g.questions || []).join(' ')).toLowerCase();
+    return hay.includes(q);
+  });
+  $('list').innerHTML = filtered.map(g => g._editing ? renderEditor(g) : renderCard(g)).join('');
+  filtered.forEach(g => {
+    const el = document.getElementById('g-' + g._id);
+    if (!el) return;
+    if (g._editing) wireEditor(el, g);
+    else wireCard(el, g);
+  });
+}
+
+function renderCard(g) {
+  const qs = (g.questions || []).map(q => `<span>${escapeHtml(q)}</span>`).join('');
+  return `<div id="g-${g._id}" class="card">
+    <div class="scene">${escapeHtml(g.scene || '其他')}${state.dirty && g._modified ? '<span class="pending">未保存</span>' : ''}</div>
+    <div class="answer">${escapeHtml(g.answer || '')}</div>
+    <div class="qs">${qs}</div>
+    ${g.risk_note ? `<div class="qs">⚠️ ${escapeHtml(g.risk_note)}</div>` : ''}
+    <div class="actions">
+      <button data-act="edit">编辑</button>
+      <button data-act="del" class="del">删除</button>
+    </div>
+  </div>`;
+}
+
+function renderEditor(g) {
+  return `<div id="g-${g._id}" class="card editor">
+    <label>scene（场景）</label>
+    <input data-f="scene" type="text" value="${escapeHtml(g.scene || '')}">
+    <label>questions（一行一条变体）</label>
+    <textarea data-f="questions">${escapeHtml((g.questions || []).join('\n'))}</textarea>
+    <label>answer（标准回复）</label>
+    <textarea data-f="answer" style="min-height:100px">${escapeHtml(g.answer || '')}</textarea>
+    <label>risk_note（可空，提醒人工注意的风险点）</label>
+    <input data-f="risk_note" type="text" value="${escapeHtml(g.risk_note || '')}">
+    <div class="actions" style="margin-top:10px">
+      <button data-act="ok">完成</button>
+      <button data-act="cancel" class="secondary">取消</button>
+    </div>
+  </div>`;
+}
+
+function wireCard(el, g) {
+  el.querySelector('[data-act=edit]').onclick = () => { g._editing = true; render(); };
+  el.querySelector('[data-act=del]').onclick = () => {
+    if (!confirm('删除这一组？')) return;
+    state.groups = state.groups.filter(x => x._id !== g._id);
+    setDirty(true);
+    render();
+  };
+}
+
+function wireEditor(el, g) {
+  el.querySelector('[data-act=ok]').onclick = () => {
+    g.scene = el.querySelector('[data-f=scene]').value;
+    g.questions = el.querySelector('[data-f=questions]').value.split('\n').map(s => s.trim()).filter(Boolean);
+    g.answer = el.querySelector('[data-f=answer]').value;
+    g.risk_note = el.querySelector('[data-f=risk_note]').value;
+    g._editing = false;
+    g._modified = true;
+    setDirty(true);
+    render();
+  };
+  el.querySelector('[data-act=cancel]').onclick = () => { g._editing = false; render(); };
+}
+
+$('load').onclick = load;
+$('save').onclick = save;
+$('search').oninput = render;
+$('add').onclick = () => {
+  const g = { _id: Math.random().toString(36).slice(2), _editing: true, _modified: true,
+    scene: '', questions: [], answer: '', risk_note: '' };
+  state.groups.unshift(g);
+  setDirty(true);
+  render();
+};
+
+window.addEventListener('beforeunload', e => {
+  if (state.dirty) { e.preventDefault(); e.returnValue = ''; }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "name": "xingshu-corpus-uploader",
+  "version": "1.0.0",
+  "description": "阿里云 FC：App → 金标知识库上传中转",
+  "main": "index.js",
+  "engines": { "node": ">=18" }
+}
