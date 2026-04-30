@@ -35,6 +35,14 @@
   .editor textarea { resize: vertical; min-height: 60px; }
   .pending { background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px;
     font-size: 11px; margin-left: 8px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+  .tabs button { padding: 8px 16px; font-size: 14px; cursor: pointer;
+    background: #fff; border: 1px solid #ccc; border-radius: 6px; }
+  .tabs button.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+  #structured-pane textarea { width: 100%; box-sizing: border-box; min-height: 60vh;
+    padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px; line-height: 1.6; border: 1px solid #ccc; border-radius: 6px; }
+  #structured-pane .hint { font-size: 12px; color: #666; margin-bottom: 8px; }
 </style>
 </head>
 <body>
@@ -63,17 +71,32 @@
   <span id="status" class="status">未加载</span>
 </div>
 
-<div class="bar">
-  <input id="search" type="text" placeholder="按 scene / question / answer 关键词过滤" style="flex:1">
-  <button id="add" class="secondary">+ 新增一组</button>
+<div class="tabs">
+  <button id="tab-qa" class="active" data-tab="qa">话术（QA）</button>
+  <button id="tab-structured" data-tab="structured">结构化数据（价格/课表）</button>
 </div>
 
-<div id="list"></div>
+<div id="qa-pane">
+  <div class="bar">
+    <input id="search" type="text" placeholder="按 scene / question / answer 关键词过滤" style="flex:1">
+    <button id="add" class="secondary">+ 新增一组</button>
+  </div>
+  <div id="list"></div>
+</div>
+
+<div id="structured-pane" style="display:none">
+  <div class="hint">直接编辑当期课程结构化文本（价格、课表、优惠政策）。保存后 CI 会更新到 dist/，App 自动同步。</div>
+  <textarea id="structured-text" placeholder="加载中…"></textarea>
+</div>
 
 <script>
 const REPO = 'yhLang/XingShuHelper-Corpus';
 const $ = id => document.getElementById(id);
-const state = { groups: [], sha: null, dirty: false };
+const state = {
+  tab: 'qa',
+  groups: [], sha: null, dirty: false,
+  structuredText: '', structuredSha: null, structuredDirty: false, structuredOriginal: '',
+};
 
 // 持久化 PAT 和账号选择到 localStorage（仓库写死）
 // PAT 优先级：localStorage > window.LOCAL_PAT（来自 local-secrets.js，gitignored）
@@ -94,12 +117,25 @@ function setStatus(msg, kind = '') {
 }
 
 function setDirty(d) {
-  state.dirty = d;
+  if (state.tab === 'qa') {
+    state.dirty = d;
+  } else {
+    state.structuredDirty = d;
+  }
+  refreshSaveButton();
+}
+
+function refreshSaveButton() {
+  const d = state.tab === 'qa' ? state.dirty : state.structuredDirty;
   $('save').disabled = !d;
 }
 
 function path() {
   return `gold/${$('account').value}.jsonl`;
+}
+
+function structuredPath() {
+  return `gold/structured_${$('account').value}.txt`;
 }
 
 async function ghApi(method, url, body) {
@@ -119,15 +155,30 @@ async function load() {
   try {
     setStatus('加载中…');
     if (!$('pat').value.trim()) throw new Error('请填 PAT');
+
+    // 话术 jsonl
     const data = await ghApi('GET', `/repos/${REPO}/contents/${path()}`);
     state.sha = data.sha;
-    const text = atob(data.content.replace(/\n/g, ''));
-    // atob 拿到 latin1，转 UTF-8
-    const utf8 = decodeURIComponent(escape(text));
+    const utf8 = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
     state.groups = utf8.split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
     state.groups.forEach(g => { g._id = Math.random().toString(36).slice(2); });
-    setDirty(false);
-    setStatus(`已加载 ${state.groups.length} 组`, 'ok');
+    state.dirty = false;
+
+    // 结构化数据 txt（不存在时给空字符串，允许新建）
+    try {
+      const sd = await ghApi('GET', `/repos/${REPO}/contents/${structuredPath()}`);
+      state.structuredSha = sd.sha;
+      state.structuredText = decodeURIComponent(escape(atob(sd.content.replace(/\n/g, ''))));
+    } catch (e) {
+      state.structuredSha = null;
+      state.structuredText = '';
+    }
+    state.structuredOriginal = state.structuredText;
+    state.structuredDirty = false;
+    $('structured-text').value = state.structuredText;
+
+    refreshSaveButton();
+    setStatus(`已加载 ${state.groups.length} 组话术 + ${state.structuredText.length} 字结构化数据`, 'ok');
     render();
   } catch (e) {
     setStatus('加载失败: ' + e.message, 'error');
@@ -137,29 +188,54 @@ async function load() {
 async function save() {
   try {
     setStatus('保存中…');
-    const lines = state.groups.map(g => {
-      const { _id, _editing, ...rest } = g;
-      return JSON.stringify({
-        scene: rest.scene || '其他',
-        questions: (rest.questions || []).map(s => s.trim()).filter(Boolean),
-        answer: rest.answer || '',
-        risk_note: rest.risk_note || '',
-      });
-    });
-    const text = lines.join('\n') + '\n';
-    // utf8 转 base64
-    const b64 = btoa(unescape(encodeURIComponent(text)));
-    const resp = await ghApi('PUT', `/repos/${REPO}/contents/${path()}`, {
-      message: `web: 更新 gold/${$('account').value}.jsonl (${state.groups.length} 组)`,
-      content: b64,
-      sha: state.sha,
-    });
-    state.sha = resp.content.sha;
-    setDirty(false);
-    setStatus(`已保存到 GitHub。CI 会在几分钟后产出新 dist/`, 'ok');
+    if (state.tab === 'qa') {
+      await saveQa();
+    } else {
+      await saveStructured();
+    }
   } catch (e) {
     setStatus('保存失败: ' + e.message, 'error');
   }
+}
+
+async function saveQa() {
+  const lines = state.groups.map(g => {
+    const { _id, _editing, ...rest } = g;
+    return JSON.stringify({
+      scene: rest.scene || '其他',
+      questions: (rest.questions || []).map(s => s.trim()).filter(Boolean),
+      answer: rest.answer || '',
+      risk_note: rest.risk_note || '',
+    });
+  });
+  const text = lines.join('\n') + '\n';
+  const b64 = btoa(unescape(encodeURIComponent(text)));
+  const resp = await ghApi('PUT', `/repos/${REPO}/contents/${path()}`, {
+    message: `web: 更新 gold/${$('account').value}.jsonl (${state.groups.length} 组)`,
+    content: b64,
+    sha: state.sha,
+  });
+  state.sha = resp.content.sha;
+  state.dirty = false;
+  refreshSaveButton();
+  setStatus(`已保存话术到 GitHub。CI 会在几分钟后产出新 dist/`, 'ok');
+}
+
+async function saveStructured() {
+  const text = $('structured-text').value;
+  const b64 = btoa(unescape(encodeURIComponent(text)));
+  const body = {
+    message: `web: 更新 ${structuredPath()} (${text.length} 字)`,
+    content: b64,
+  };
+  if (state.structuredSha) body.sha = state.structuredSha;
+  const resp = await ghApi('PUT', `/repos/${REPO}/contents/${structuredPath()}`, body);
+  state.structuredSha = resp.content.sha;
+  state.structuredText = text;
+  state.structuredOriginal = text;
+  state.structuredDirty = false;
+  refreshSaveButton();
+  setStatus(`已保存结构化数据到 GitHub。CI 会在几分钟后产出新 dist/`, 'ok');
 }
 
 function escapeHtml(s) {
@@ -249,8 +325,26 @@ $('add').onclick = () => {
   render();
 };
 
+// Tab 切换
+document.querySelectorAll('.tabs button').forEach(btn => {
+  btn.onclick = () => {
+    const tab = btn.dataset.tab;
+    state.tab = tab;
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b === btn));
+    $('qa-pane').style.display = tab === 'qa' ? '' : 'none';
+    $('structured-pane').style.display = tab === 'structured' ? '' : 'none';
+    refreshSaveButton();
+  };
+});
+
+// 结构化文本变化触发 dirty
+$('structured-text').addEventListener('input', () => {
+  state.structuredDirty = $('structured-text').value !== state.structuredOriginal;
+  refreshSaveButton();
+});
+
 window.addEventListener('beforeunload', e => {
-  if (state.dirty) { e.preventDefault(); e.returnValue = ''; }
+  if (state.dirty || state.structuredDirty) { e.preventDefault(); e.returnValue = ''; }
 });
 </script>
 </body>

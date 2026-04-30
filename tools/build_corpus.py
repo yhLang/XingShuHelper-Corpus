@@ -130,6 +130,14 @@ def previous_texts_sha(manifest_path: Path) -> str:
     return m.get("files", {}).get("texts", {}).get("sha256", "")
 
 
+def previous_structured_sha(manifest_path: Path) -> str:
+    if not manifest_path.exists():
+        return ""
+    m = json.loads(manifest_path.read_text(encoding="utf-8"))
+    s = m.get("files", {}).get("structured")
+    return s.get("sha256", "") if s else ""
+
+
 def build_account(account: str) -> bool:
     """返回 True 表示产物有更新。"""
     src = ROOT / "gold" / f"{account}.jsonl"
@@ -143,44 +151,60 @@ def build_account(account: str) -> bool:
     out_dir = ROOT / "dist" / account
     texts_path = out_dir / f"qa_{account}_texts.json"
     emb_path = out_dir / f"qa_{account}_embeddings.bin"
+    structured_src = ROOT / "gold" / f"structured_{account}.txt"
+    structured_dst = out_dir / f"structured_{account}.txt"
     manifest_path = ROOT / "dist" / f"{account}.manifest.json"
 
     out_dir.mkdir(parents=True, exist_ok=True)
     new_texts_json = json.dumps(items, ensure_ascii=False, indent=2)
 
-    # 比较 texts 内容：未变就跳过 embedding 调用
+    # 比较 texts 和 structured 内容：都未变就跳过 embedding 调用
     new_texts_sha = hashlib.sha256(new_texts_json.encode("utf-8")).hexdigest()
-    if new_texts_sha == previous_texts_sha(manifest_path) and emb_path.exists():
+    new_structured_sha = sha256_of(structured_src) if structured_src.exists() else ""
+    texts_unchanged = new_texts_sha == previous_texts_sha(manifest_path) and emb_path.exists()
+    structured_unchanged = new_structured_sha == previous_structured_sha(manifest_path)
+    if texts_unchanged and structured_unchanged:
         print(f"[{account}] 内容未变化，跳过")
         return False
 
     texts_path.write_text(new_texts_json, encoding="utf-8")
 
-    # embedding（带缓存）
-    cache_path = ROOT / ".embed_cache" / f"{account}.json"
-    cache = load_cache(cache_path)
-    questions = [it["question"] for it in items]
-    vectors = embed_texts(questions, cache)
-    save_cache(cache, cache_path)
-    write_embeddings_bin(vectors, emb_path)
+    # embedding（带缓存）；texts 没变化则跳过 API 调用，复用现有 emb 文件
+    if not texts_unchanged:
+        cache_path = ROOT / ".embed_cache" / f"{account}.json"
+        cache = load_cache(cache_path)
+        questions = [it["question"] for it in items]
+        vectors = embed_texts(questions, cache)
+        save_cache(cache, cache_path)
+        write_embeddings_bin(vectors, emb_path)
+
+    # 结构化数据：直接拷贝到 dist/，进 manifest
+    files_block = {
+        "texts": {
+            "path": f"dist/{account}/{texts_path.name}",
+            "sha256": sha256_of(texts_path),
+            "size": texts_path.stat().st_size,
+        },
+        "embeddings": {
+            "path": f"dist/{account}/{emb_path.name}",
+            "sha256": sha256_of(emb_path),
+            "size": emb_path.stat().st_size,
+        },
+    }
+    if structured_src.exists():
+        structured_dst.write_text(structured_src.read_text(encoding="utf-8"), encoding="utf-8")
+        files_block["structured"] = {
+            "path": f"dist/{account}/{structured_dst.name}",
+            "sha256": sha256_of(structured_dst),
+            "size": structured_dst.stat().st_size,
+        }
 
     version = previous_version(manifest_path) + 1
     manifest = {
         "version": version,
         "count": len(items),
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "files": {
-            "texts": {
-                "path": f"dist/{account}/{texts_path.name}",
-                "sha256": sha256_of(texts_path),
-                "size": texts_path.stat().st_size,
-            },
-            "embeddings": {
-                "path": f"dist/{account}/{emb_path.name}",
-                "sha256": sha256_of(emb_path),
-                "size": emb_path.stat().st_size,
-            },
-        },
+        "files": files_block,
     }
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[{account}] 已构建 v{version}, {len(items)} 条")
