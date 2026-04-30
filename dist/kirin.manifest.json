@@ -1,17 +1,17 @@
 {
-  "version": 1,
-  "count": 73,
-  "updated_at": "2026-04-29T16:48:39Z",
+  "version": 2,
+  "count": 74,
+  "updated_at": "2026-04-30T07:45:27Z",
   "files": {
     "texts": {
       "path": "dist/kirin/qa_kirin_texts.json",
-      "sha256": "33c24b706f52ed0c861f2a5974f316a236689a2186ea5f85539ebd1dea867665",
-      "size": 27732
+      "sha256": "04bea8b33c54e65e8f829f1f0aa89862e106f3805d645fcff41f63a8feb4d5f4",
+      "size": 28156
     },
     "embeddings": {
       "path": "dist/kirin/qa_kirin_embeddings.bin",
-      "sha256": "00cda701cb66edf2459f0919d26bb9cd2bd9a2675caf3860f1a7a21edeabb75b",
-      "size": 299016
+      "sha256": "46d8c22d3a47b931d6fb9e3ed93f9a4cc7a0122cc33385819cc42dbf08dc1c19",
+      "size": 303112
     }
   }
 }
