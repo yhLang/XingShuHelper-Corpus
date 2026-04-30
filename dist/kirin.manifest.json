@@ -1,7 +1,7 @@
 {
-  "version": 2,
+  "version": 3,
   "count": 74,
-  "updated_at": "2026-04-30T07:45:27Z",
+  "updated_at": "2026-04-30T08:44:43Z",
   "files": {
     "texts": {
       "path": "dist/kirin/qa_kirin_texts.json",
@@ -12,6 +12,11 @@
       "path": "dist/kirin/qa_kirin_embeddings.bin",
       "sha256": "46d8c22d3a47b931d6fb9e3ed93f9a4cc7a0122cc33385819cc42dbf08dc1c19",
       "size": 303112
+    },
+    "structured": {
+      "path": "dist/kirin/structured_kirin.txt",
+      "sha256": "f2a2f72b9419581e2c40fbd787d7c2c5e6f5709148c87fe81440502823275f4e",
+      "size": 2002
     }
   }
 }
